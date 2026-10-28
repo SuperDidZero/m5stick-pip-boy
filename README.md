@@ -4,6 +4,10 @@ A pocket Fallout-style **Pip-Boy** that runs on an [M5Stack StickS3](https://doc
 
 Built by **SuperDidZero**. The vault-dweller figure is my own cartoon avatar, left in so you get the same little guy; swap the links and handle for your own (see below).
 
+![The four screens: STAT with the clock, STAT with no Wi-Fi, the BASE QR tab, and the RAD counter](images/screens.png)
+
+*Screen previews rendered from the sketch: STAT with the time and date, STAT with no known Wi-Fi (handle shown big), the BASE tab with a working QR code to pcbuildpt.com, and the RAD counter you get by shaking it.*
+
 ## What it does
 
 - **STAT** — a walking vault-dweller, your handle, and the time and date (day.month.year). HP = the real battery level along the bottom. He reacts to the battery:
