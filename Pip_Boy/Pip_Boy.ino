@@ -1,9 +1,9 @@
 /*
-  SUPER's Miniature Pip-Boy  -  M5StickS3
+  Miniature Pip-Boy (by SuperDidZero)  -  M5StickS3
   --------------------------------------------------------------
   Tabs:  STAT (you) | COMMS (LinkedIn) | BASE (website) | RADIO (Instagram) | RAD (Geiger)
   Front button (BtnA) = next tab      Side button (BtnB) = previous tab
-  Shake = mute / unmute sound
+  Shake = full-screen Pip-Boy clock (shake again to go back)
   Battery drives the figure: >50% healthy (walks, winks, thumbs up),
   20-50% tired, under 20% knocked out on the floor.
 
@@ -15,13 +15,18 @@
 */
 #include <M5Unified.h>
 #include <WiFi.h>
+#include <time.h>
 #include "sprites.h"
 
 // >>> your public links (safe to share) <<<
-const char* URL_INSTAGRAM = "https://instagram.com/YOUR_HANDLE";                 // RADIO tab
-const char* URL_LINKEDIN  = "https://linkedin.com/in/YOUR_LINKEDIN"; // COMMS tab
-const char* URL_WEBSITE   = "https://YOUR-WEBSITE.example";                           // BASE tab
+const char* URL_INSTAGRAM = "https://instagram.com/YOUR_HANDLE";                  // RADIO tab
+const char* URL_LINKEDIN  = "https://linkedin.com/in/YOUR_LINKEDIN";               // COMMS tab
+const char* URL_WEBSITE   = "https://YOUR-WEBSITE.example";                        // BASE tab
 const char* HANDLE        = "@YOUR_HANDLE";
+
+// Wi-Fi is used once at boot only, to fetch the clock time (NTP). GitHub copy keeps placeholders.
+const char* WIFI_SSID     = "YOUR_WIFI_NAME";
+const char* WIFI_PASS     = "YOUR_WIFI_PASSWORD";
 
 // ---------- colours (green CRT) ----------
 #define C_BG   0x0160   // dark green-black
@@ -35,6 +40,10 @@ M5Canvas canvas(&M5.Display);
 enum { T_STAT, T_COMMS, T_BASE, T_RADIO, T_RAD, T_COUNT };
 const char* TAB_NAME[T_COUNT] = { "STAT", "COMMS", "BASE", "RADIO", "RAD" };
 int tab = T_STAT;
+bool bootWifiOk = false;          // did Wi-Fi connect at boot (for the clock)
+bool timeScreen = false;          // shake toggles the full Pip-Boy clock screen
+bool timeSynced = false;          // has NTP set the clock yet
+bool wifiGaveUp = false;          // stopped trying NTP (so the radio can't drain the battery)
 
 // ---------- sound ----------
 bool muted = false;
@@ -61,7 +70,7 @@ void updateMelody(){
 void beep(uint16_t f, uint16_t d){ if(!muted) M5.Speaker.tone(f,d); }
 
 // ---------- geiger ----------
-int   gLevel = 0;            // 0..12 signal density
+int   gLevel = 0, gCount = 0;   // gLevel 0..12 from strongest signal; gCount = networks seen
 uint32_t gNextClick = 0, gNextScan = 0;
 bool  scanning = false;
 
@@ -74,15 +83,18 @@ void updateGeiger(){
   }
   int res = WiFi.scanComplete();
   if(scanning && res >= 0){
-    int lvl = res; if(lvl>12) lvl=12;
-    gLevel = lvl;
+    int best = -100;
+    for(int i=0;i<res;i++){ int r = WiFi.RSSI(i); if(r > best) best = r; }
+    // strongest signal: ~ -90 dBm (far/weak) up to ~ -35 dBm (right next to a router)
+    gLevel = (res > 0) ? map(constrain(best, -90, -35), -90, -35, 0, 12) : 0;
+    gCount = res;
     WiFi.scanDelete();
     scanning = false;
-    gNextScan = millis() + 3000;
+    gNextScan = millis() + 2500;
   }
-  // click rate from level
+  // click rate follows the signal strength
   if(millis() > gNextClick){
-    int interval = map(gLevel, 0, 12, 900, 90);
+    int interval = map(gLevel, 0, 12, 900, 70);
     gNextClick = millis() + interval;
     beep(1600, 6);
   }
@@ -94,10 +106,10 @@ void checkShake(){
   float ax, ay, az;
   if(M5.Imu.getAccel(&ax, &ay, &az)){
     float mag = sqrtf(ax*ax + ay*ay + az*az);
-    if(fabs(mag - lastMag) > 1.2 && millis() > shakeLock){
-      muted = !muted;
-      shakeLock = millis() + 800;
-      if(!muted) M5.Speaker.tone(880, 60);
+    if(fabs(mag - lastMag) > 0.7 && millis() > shakeLock){
+      timeScreen = !timeScreen;              // shake flips the full Pip-Boy clock screen
+      shakeLock = millis() + 700;
+      beep(timeScreen ? 1200 : 700, 45);
     }
     lastMag = mag;
   }
@@ -136,31 +148,51 @@ void drawHP(){
   if(muted) canvas.drawString("[muted]", 67, 213);
 }
 
-// healthy animation timing
+// healthy idle: random poses
 uint32_t beatStart = 0; bool thumbBeat = false;
+int idleState = 0; uint32_t idleUntil = 0;
 
 void drawFigure(){
   int lvl = M5.Power.getBatteryLevel(); if(lvl < 0) lvl = 100;
   int bob = (int)(sinf(millis()/300.0) * 3);   // gentle up/down
   canvas.setTextColor(C_GRN); canvas.setTextDatum(top_center); canvas.setTextSize(1);
-  canvas.drawString(HANDLE, 67, 24);           // name right under the tab line
+  canvas.drawString(HANDLE, 67, 22);
+  struct tm tnow;                              // boot clock (details live on the shake screen)
+  canvas.setTextDatum(top_center); canvas.setTextSize(2);
+  if(getLocalTime(&tnow, 0)){
+    char tb[6]; sprintf(tb, "%02d:%02d", tnow.tm_hour, tnow.tm_min);
+    canvas.setTextColor(C_GRN); canvas.drawString(tb, 67, 30);
+  } else {
+    canvas.setTextColor(C_DIM); canvas.drawString("--:--", 67, 30);
+  }
+  canvas.setTextSize(1); canvas.setTextColor(C_GRN);
   if(lvl > 50){
-    // every 4s, pause the walk for a thumbs up + wink (~1.3s)
-    if(millis() - beatStart > 4000){ thumbBeat = true; beatStart = millis(); }
-    if(thumbBeat && millis() - beatStart > 1300) thumbBeat = false;
-    if(thumbBeat){
-      canvas.pushImage((135-THUMB_W)/2, 46+bob, THUMB_W, THUMB_H, SPR_THUMB, KEY);
-    } else {                                   // 2-frame walk cycle, mirror = opposite step
+    // random idle: walk, stop, thumbs-up/wink, wave
+    if(millis() > idleUntil){
+      int r = random(100);
+      if(r < 45)      { idleState = 0; idleUntil = millis() + random(1800, 4000); } // walk
+      else if(r < 65) { idleState = 1; idleUntil = millis() + random(1200, 2600); } // stand
+      else if(r < 80) { idleState = 2; idleUntil = millis() + random(1100, 1800); } // thumbs + wink
+      else            { idleState = 3; idleUntil = millis() + random(1200, 2200); } // wave
+    }
+    if(idleState == 0){                        // walking, mirror = opposite step
       bool leg = (millis()/260) % 2;
-      if(leg) canvas.pushImage((135-WALK_W)/2,  46+bob, WALK_W,  WALK_H,  SPR_WALK,  KEY);
-      else    canvas.pushImage((135-WALKF_W)/2, 46+bob, WALKF_W, WALKF_H, SPR_WALKF, KEY);
+      const uint16_t* s = leg ? SPR_WALK : SPR_WALKF;
+      int16_t sw = leg ? WALK_W : WALKF_W, sh = leg ? WALK_H : WALKF_H;
+      canvas.pushImage((135-sw)/2, 52+bob, sw, sh, s, KEY);
+    } else if(idleState == 2){
+      canvas.pushImage((135-THUMB_W)/2, 52+bob, THUMB_W, THUMB_H, SPR_THUMB, KEY);
+    } else if(idleState == 3){
+      canvas.pushImage((135-WAVE_W)/2, 52+bob, WAVE_W, WAVE_H, SPR_WAVE, KEY);
+    } else {
+      canvas.pushImage((135-HEALTHY_W)/2, 52+bob, HEALTHY_W, HEALTHY_H, SPR_HEALTHY, KEY);
     }
   } else if(lvl >= 20){
     int sway = (int)(sinf(millis()/450.0) * 2);
-    canvas.pushImage((135-TIRED_W)/2+sway, 48+bob, TIRED_W, TIRED_H, SPR_TIRED, KEY);
+    canvas.pushImage((135-TIRED_W)/2+sway, 54+bob, TIRED_W, TIRED_H, SPR_TIRED, KEY);
   } else {
     int breathe = (int)(sinf(millis()/700.0) * 2);
-    canvas.pushImage((135-DOWN_W)/2, 86+breathe, DOWN_W, DOWN_H, SPR_DOWN, KEY);
+    canvas.pushImage((135-DOWN_W)/2, 90+breathe, DOWN_W, DOWN_H, SPR_DOWN, KEY);
   }
 }
 
@@ -188,6 +220,7 @@ void drawGeiger(){
   canvas.setTextColor(C_DIM);
   canvas.drawString("WIFI SIGNAL", 67, 128);
   canvas.drawString(String(gLevel*8) + " cps", 67, 140);
+  canvas.drawString(String(gCount) + " nets", 67, 150);
   // live click bars
   for(int i=0;i<8;i++){
     int h = 3 + (gLevel? random(2, gLevel+3) : 1);
@@ -195,8 +228,31 @@ void drawGeiger(){
   }
 }
 
+void drawTimeScreen(){
+  struct tm t; bool ok = getLocalTime(&t, 0);
+  canvas.drawRect(0, 0, 135, 240, C_GRN);
+  canvas.setTextColor(C_GRN); canvas.setTextDatum(top_center); canvas.setTextSize(1);
+  canvas.drawString("PIP-BOY CLOCK", 67, 10);
+  canvas.drawFastHLine(10, 22, 115, C_DIM);
+  char hhmm[6]; if(ok) sprintf(hhmm, "%02d:%02d", t.tm_hour, t.tm_min); else strcpy(hhmm, "--:--");
+  canvas.setTextDatum(middle_center); canvas.setTextSize(4);
+  canvas.drawString(hhmm, 67, 72);
+  if(ok){ char ss[5]; sprintf(ss, ":%02d", t.tm_sec); canvas.setTextSize(2); canvas.drawString(ss, 67, 104); }
+  canvas.setTextDatum(top_center); canvas.setTextSize(1);
+  const char* days[] = {"SUN","MON","TUE","WED","THU","FRI","SAT"};
+  const char* mons[] = {"JAN","FEB","MAR","APR","MAY","JUN","JUL","AUG","SEP","OCT","NOV","DEC"};
+  if(ok){ char dl[28]; sprintf(dl, "%s  %02d %s %04d", days[t.tm_wday], t.tm_mday, mons[t.tm_mon], 1900+t.tm_year); canvas.drawString(dl, 67, 130); }
+  else  { canvas.setTextColor(C_DIM); canvas.drawString(bootWifiOk ? "no time signal" : "no wifi at boot", 67, 130); canvas.setTextColor(C_GRN); }
+  canvas.setTextColor(C_DIM);
+  char rad[22]; sprintf(rad, "RADS   %d cps", gLevel*8); canvas.drawString(rad, 67, 150);
+  canvas.drawString("STATUS   NOMINAL", 67, 162);
+  canvas.setTextColor(C_GRN); canvas.setTextDatum(bottom_center);
+  canvas.drawString("shake to go back", 67, 232);
+}
+
 void render(){
   canvas.fillSprite(C_BG);
+  if(timeScreen){ drawTimeScreen(); canvas.pushSprite(0, 0); return; }
   drawTabs();
   switch(tab){
     case T_STAT:  drawFigure(); break;
@@ -224,7 +280,18 @@ void setup(){
   M5.Speaker.begin();
   M5.Speaker.setVolume(140);
   WiFi.mode(WIFI_STA);
-  WiFi.disconnect();                // station mode, used only to scan on the RAD tab
+  // grab the real time once at boot, then run the clock locally (no battery-backed RTC)
+  WiFi.begin(WIFI_SSID, WIFI_PASS);
+  for(int i=0; i<30 && WiFi.status()!=WL_CONNECTED; i++) delay(300);   // up to ~9s to join
+  bootWifiOk = (WiFi.status()==WL_CONNECTED);
+  if(bootWifiOk){
+    configTzTime("WET0WEST,M3.5.0/1,M10.5.0", "pool.ntp.org", "time.google.com", "time.cloudflare.com");
+    struct tm t; for(int i=0; i<20 && !getLocalTime(&t, 0); i++) delay(300);   // ~6s at boot
+    if(getLocalTime(&t, 0)){ timeSynced = true; WiFi.disconnect(); }
+    // if not synced yet, leave Wi-Fi on; loop() keeps trying NTP, then disconnects once it lands
+  } else {
+    WiFi.disconnect();
+  }
   canvas.setColorDepth(16);
   canvas.createSprite(135, 240);
   randomSeed(esp_random());
@@ -234,6 +301,13 @@ void setup(){
 
 void loop(){
   M5.update();
+  // keep trying NTP until the clock lands, then drop Wi-Fi.
+  // give up after ~40s so a blocked time server can't keep the radio on and drain the battery.
+  if(bootWifiOk && !timeSynced && !wifiGaveUp){
+    struct tm t;
+    if(getLocalTime(&t, 0)){ timeSynced = true; WiFi.disconnect(); }
+    else if(millis() > 40000){ WiFi.disconnect(); wifiGaveUp = true; }
+  }
   if(M5.BtnA.wasPressed()){ tab = (tab + 1) % T_COUNT; beep(1046, 30); onEnterTab(); }
   if(M5.BtnB.wasPressed()){ tab = (tab - 1 + T_COUNT) % T_COUNT; beep(880, 30); onEnterTab(); }
   checkShake();

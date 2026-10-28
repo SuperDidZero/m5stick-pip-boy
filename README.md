@@ -7,17 +7,18 @@ Built by **SuperDidZero**. The vault-dweller figure is my own cartoon avatar, le
 ## What it does
 
 - **STAT** — a walking vault-dweller + your handle, with HP = the real battery level along the bottom. He reacts to the battery:
-  - above 50%: walks, winks, throws a thumbs up
+  - above 50%: random idle poses (walks, stops, thumbs up with a wink, waves)
   - 20–50%: slumped and panting
   - under 20%: collapsed on the floor
 - **COMMS / BASE / RADIO** — three QR codes (LinkedIn, website, Instagram), each playing a short public-domain tune when you open it.
-- **RAD** — a Geiger counter driven by the Wi-Fi signal around you (needle + clicks).
+- **RAD** — a Geiger counter driven by the strongest Wi-Fi signal around you (needle + clicks), plus a count of nearby networks.
+- **Clock** — the time (HH:MM) on STAT, and a full-screen Pip-Boy clock with date when you shake it. The time comes from the internet once at boot over your Wi-Fi, then Wi-Fi switches off (it gives up after about 40 seconds so it can't drain the battery).
 
 ## Controls
 
 - **Front button** — next tab
 - **Side button** — previous tab
-- **Shake** — mute / unmute
+- **Shake** — full-screen clock, shake again to go back
 
 ## How it fits together
 
@@ -29,14 +30,14 @@ flowchart LR
     BASE -- front --> RADIO["RADIO<br/>Instagram QR"]
     RADIO -- front --> RAD["RAD<br/>Wi-Fi Geiger"]
     RAD -- front --> STAT
-    SIDE[["Side button = previous tab<br/>Shake = mute / unmute"]]
+    SIDE[["Side button = previous tab<br/>Shake = full-screen clock"]]
 ```
 
 The figure on STAT changes with the real battery level:
 
 ```mermaid
 flowchart LR
-    A["Above 50%<br/>walks, winks, thumbs up"] -->|battery drops| B["20 to 50%<br/>slumped and panting"]
+    A["Above 50%<br/>walks, waves, winks, thumbs up"] -->|battery drops| B["20 to 50%<br/>slumped and panting"]
     B -->|battery drops| C["Under 20%<br/>collapsed on the floor"]
     C -->|charging| A
 ```
@@ -57,7 +58,11 @@ const char* URL_INSTAGRAM = "https://instagram.com/YOUR_HANDLE";
 const char* URL_LINKEDIN  = "https://linkedin.com/in/YOUR_LINKEDIN";
 const char* URL_WEBSITE   = "https://YOUR-WEBSITE.example";
 const char* HANDLE        = "@YOUR_HANDLE";
+const char* WIFI_SSID     = "YOUR_WIFI_NAME";      // only used to fetch the time
+const char* WIFI_PASS     = "YOUR_WIFI_PASSWORD";
 ```
+
+Use a 2.4 GHz network (the StickS3 can't join 5 GHz). Don't commit your real Wi-Fi password if you publish your copy.
 
 To use your own character, replace the sprites in `sprites.h` (RGB565, byte-swapped for the panel, `0x1FF8` as the transparent colour).
 
