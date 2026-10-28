@@ -50,35 +50,6 @@ bool wifiGaveUp = false;          // stopped trying NTP (so the radio can't drai
 bool rtcPresent = false;          // does this stick have a battery-backed clock chip
 bool fromRtc    = false;          // did we restore the time from that chip at boot
 
-// ---- battery-backed clock (RTC) helpers ----
-// The RTC chip keeps ticking while the stick is off, on its own trickle of power,
-// so we set it once and it holds the time anywhere - no home Wi-Fi needed again.
-// We store UTC in the chip and let the timezone turn it into local time for the screen.
-
-// read the RTC into the system clock; true if it held a real (already-set) time
-bool loadTimeFromRtc(){
-  if(!rtcPresent) return false;
-  auto dt = M5.Rtc.getDateTime();
-  if(dt.date.year < 2021) return false;          // 2000 = never been set
-  struct tm tmu = {0};
-  tmu.tm_year = dt.date.year - 1900;
-  tmu.tm_mon  = dt.date.month - 1;
-  tmu.tm_mday = dt.date.date;
-  tmu.tm_hour = dt.time.hours;
-  tmu.tm_min  = dt.time.minutes;
-  tmu.tm_sec  = dt.time.seconds;
-  time_t utc = timegm(&tmu);                      // the chip holds UTC
-  struct timeval tv = { utc, 0 };
-  settimeofday(&tv, nullptr);
-  return true;
-}
-
-// copy the current (NTP-correct) system time into the RTC chip so it survives power-off
-void saveTimeToRtc(){
-  if(!rtcPresent) return;
-  time_t now = time(nullptr);
-  M5.Rtc.setDateTime(gmtime(&now));               // store UTC
-}
 
 // ---------- sound ----------
 bool muted = false;
@@ -103,6 +74,48 @@ void updateMelody(){
   }
 }
 void beep(uint16_t f, uint16_t d){ if(!muted) M5.Speaker.tone(f,d); }
+
+// ---- battery-backed clock (RTC) helpers ----
+// The RTC chip keeps ticking while the stick is off, on its own trickle of power,
+// so we set it once and it holds the time anywhere - no home Wi-Fi needed again.
+// We store UTC in the chip and let the timezone turn it into local time for the screen.
+
+// turn a UTC date/time into seconds since 1970 (ESP32 has no timegm)
+time_t utcFromTm(const struct tm* t){
+  int y = t->tm_year + 1900, m = t->tm_mon + 1, d = t->tm_mday;
+  y -= (m <= 2);
+  long era = (y >= 0 ? y : y - 399) / 400;
+  long yoe = y - era * 400;
+  long doy = (153 * (m + (m > 2 ? -3 : 9)) + 2) / 5 + d - 1;
+  long doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
+  long days = era * 146097L + doe - 719468L;
+  return (time_t)days * 86400 + t->tm_hour * 3600 + t->tm_min * 60 + t->tm_sec;
+}
+
+// read the RTC into the system clock; true if it held a real (already-set) time
+bool loadTimeFromRtc(){
+  if(!rtcPresent) return false;
+  auto dt = M5.Rtc.getDateTime();
+  if(dt.date.year < 2021) return false;          // 2000 = never been set
+  struct tm tmu = {0};
+  tmu.tm_year = dt.date.year - 1900;
+  tmu.tm_mon  = dt.date.month - 1;
+  tmu.tm_mday = dt.date.date;
+  tmu.tm_hour = dt.time.hours;
+  tmu.tm_min  = dt.time.minutes;
+  tmu.tm_sec  = dt.time.seconds;
+  time_t utc = utcFromTm(&tmu);                      // the chip holds UTC
+  struct timeval tv = { utc, 0 };
+  settimeofday(&tv, nullptr);
+  return true;
+}
+
+// copy the current (NTP-correct) system time into the RTC chip so it survives power-off
+void saveTimeToRtc(){
+  if(!rtcPresent) return;
+  time_t now = time(nullptr);
+  M5.Rtc.setDateTime(gmtime(&now));               // store UTC
+}
 
 // ---------- geiger ----------
 int   gLevel = 0, gCount = 0;   // gLevel 0..12 from strongest signal; gCount = networks seen
