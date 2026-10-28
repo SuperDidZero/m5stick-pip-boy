@@ -6,7 +6,7 @@ Built by **SuperDidZero**. The vault-dweller figure is my own cartoon avatar, le
 
 ## What it does
 
-- **STAT** — a walking vault-dweller, your handle, and the time and date. HP = the real battery level along the bottom. He reacts to the battery:
+- **STAT** — a walking vault-dweller, your handle, and the time and date (day.month.year). HP = the real battery level along the bottom. He reacts to the battery:
   - above 50%: random idle poses (walks, stops, thumbs up with a wink, waves)
   - 20–50%: slumped and panting
   - under 20%: collapsed on the floor
@@ -16,6 +16,10 @@ Built by **SuperDidZero**. The vault-dweller figure is my own cartoon avatar, le
 ### About the time
 
 The StickS3 has no battery-backed clock, so it can't keep time while it's switched off. At every boot it tries your Wi-Fi once to fetch the time, then turns Wi-Fi off (it gives up after about 40 seconds so it can't drain the battery). If it got the time, STAT shows it until you switch off, even after you leave home. If there was no known Wi-Fi at boot, the time and date are simply left off the screen.
+
+### LCD lettering
+
+Every word and number is drawn as a segmented LCD display, like an old digital watch: 14-segment letters, and a big 7-segment clock with the faint unlit segments showing behind the digits. It's all drawn in code, no font files needed.
 
 ## Controls
 
