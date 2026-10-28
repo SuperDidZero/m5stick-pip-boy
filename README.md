@@ -19,6 +19,28 @@ Built by **SuperDidZero**. The vault-dweller figure is my own cartoon avatar, le
 - **Side button** — previous tab
 - **Shake** — mute / unmute
 
+## How it fits together
+
+```mermaid
+flowchart LR
+    BOOT([Power on]) --> STAT
+    STAT["STAT<br/>figure + handle<br/>HP = battery"] -- front --> COMMS["COMMS<br/>LinkedIn QR"]
+    COMMS -- front --> BASE["BASE<br/>website QR"]
+    BASE -- front --> RADIO["RADIO<br/>Instagram QR"]
+    RADIO -- front --> RAD["RAD<br/>Wi-Fi Geiger"]
+    RAD -- front --> STAT
+    SIDE[["Side button = previous tab<br/>Shake = mute / unmute"]]
+```
+
+The figure on STAT changes with the real battery level:
+
+```mermaid
+flowchart LR
+    A["Above 50%<br/>walks, winks, thumbs up"] -->|battery drops| B["20 to 50%<br/>slumped and panting"]
+    B -->|battery drops| C["Under 20%<br/>collapsed on the floor"]
+    C -->|charging| A
+```
+
 ## Build it
 
 1. Put `Pip_Boy.ino` and `sprites.h` together in a folder named `Pip_Boy`.
