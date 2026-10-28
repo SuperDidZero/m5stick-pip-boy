@@ -19,7 +19,7 @@ The StickS3 has no battery-backed clock, so it can't keep time while it's switch
 
 ### LCD lettering
 
-Every word and number is drawn as a segmented LCD display, like an old digital watch: 14-segment letters, and a big 7-segment clock with the faint unlit segments showing behind the digits. It's all drawn in code, no font files needed.
+Every word and number is drawn as a segmented LCD display, like an old digital watch: 14-segment letters, and 7-segment numbers (clock, date, HP and the RAD readings) with the faint unlit segments shaded behind the digits. It's all drawn in code, no font files needed.
 
 ## Controls
 

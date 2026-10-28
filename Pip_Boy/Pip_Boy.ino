@@ -76,7 +76,7 @@ void beep(uint16_t f, uint16_t d){ if(!muted) M5.Speaker.tone(f,d); }
 // Every word and number is drawn as a segmented LCD display, like an old digital watch.
 // Letters use 14 segments, digits look like a 7-segment clock. Big digits can show the
 // faint "unlit" segments behind them (ghost), like a real LCD.
-#define C_GHOST 0x01C0   // unlit segment, just a touch brighter than the background
+#define C_GHOST 0x02A0   // unlit segment shade, clearly visible but well below the lit green
 enum { SA=1, SB=2, SC=4, SD=8, SE=16, SF=32, SG1=64, SG2=128,
        SH=256, SI=512, SJ=1024, SK=2048, SL=4096, SM=8192 };
 const uint16_t SEG7ALL = SA|SB|SC|SD|SE|SF|SG1|SG2;
@@ -217,7 +217,7 @@ int segText(const char* s, int x, int y, int h, int w, int t, int align, uint16_
       canvas.fillRect(x, y, 2, 2, col);
       canvas.fillRect(x + w - 2, y + h - 2, 2, 2, col);
     } else {
-      if(ghost && c >= '0' && c <= '9') segDraw(x, y, w, h, t, SEG7ALL, C_GHOST);
+      if(ghost && ((c >= '0' && c <= '9') || c == ' ')) segDraw(x, y, w, h, t, SEG7ALL, C_GHOST);
       segDraw(x, y, w, h, t, (w < 8) ? segMaskSmall(c) : segMask(c), col);
     }
     x += cw + gap;
@@ -299,8 +299,8 @@ void drawHP(){
   canvas.drawRect(24, 222, 72, 10, C_GRN);
   int w = (70 * lvl) / 100;
   canvas.fillRect(25, 223, w, 8, C_GRN);
-  char pc[12]; sprintf(pc, "%d%%", lvl);
-  segSmall(pc, 132, 223, 2, C_GRN);
+  char pc[12]; sprintf(pc, "%3d%%", constrain(lvl, 0, 100));
+  segText(pc, 132, 223, TXT_H, TXT_W, 1, 2, C_GRN, true);
 }
 
 // healthy idle: random poses
@@ -316,7 +316,7 @@ void drawFigure(){
     char tb[12]; sprintf(tb, "%02d:%02d", tnow.tm_hour, tnow.tm_min);
     char db[24]; sprintf(db, "%02d.%02d.%04d", tnow.tm_mday, tnow.tm_mon + 1, 1900 + tnow.tm_year);
     segText(tb, 67, 33, 22, 16, 3, 1, C_GRN, true);    // big LCD clock with unlit segments behind
-    segText(db, 67, 57, 7, 4, 1, 1, C_DIM, false);            // date in numbers: day.month.year
+    segText(db, 67, 57, 7, 4, 1, 1, C_GRN, true);             // date in numbers: day.month.year
   }                                            // no time: leave the space empty
   if(lvl > 50){
     // random idle: walk, stop, thumbs-up/wink, wave
@@ -367,12 +367,16 @@ void drawGeiger(){
   canvas.drawLine(cx, cy, cx+cos(na)*(r-8), cy+sin(na)*(r-8), C_GRN);
   canvas.fillCircle(cx, cy, 3, C_GRN);
   segSmall("WIFI SIGNAL", 67, 128, 1, C_DIM);
-  char cps[12];  sprintf(cps, "%d CPS", gLevel*8);  segSmall(cps, 67, 141, 1, C_DIM);
-  char nets[12]; sprintf(nets, "%d NETS", gCount);  segSmall(nets, 67, 154, 1, C_DIM);
+  // readings as LCD digits with the unlit segments shaded, fixed width like a real meter
+  char cps[8];  sprintf(cps,  "%03d", constrain(gLevel*8, 0, 999));
+  char nets[8]; sprintf(nets, "%02d",  constrain(gCount, 0, 99));
+  int nx = 67 - 30;
+  segText(cps,  nx, 140, 18, 11, 2, 0, C_GRN, true);  segSmall("CPS",  nx + 44, 149, 0, C_DIM);
+  segText(nets, nx, 164, 18, 11, 2, 0, C_GRN, true);  segSmall("NETS", nx + 44, 173, 0, C_DIM);
   // live click bars
   for(int i=0;i<8;i++){
     int h = 3 + (gLevel? random(2, gLevel+3) : 1);
-    canvas.fillRect(24 + i*12, 185 - h, 6, h, C_GRN);
+    canvas.fillRect(24 + i*12, 205 - h, 6, h, C_GRN);
   }
 }
 
