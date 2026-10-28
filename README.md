@@ -12,7 +12,7 @@ Built by **SuperDidZero**. The vault-dweller figure is my own cartoon avatar, le
   - under 20%: collapsed on the floor
 - **COMMS / BASE / RADIO** — three QR codes (LinkedIn, website, Instagram), each playing a short public-domain tune when you open it.
 - **RAD** — a Geiger counter driven by the strongest Wi-Fi signal around you (needle + clicks), plus a count of nearby networks.
-- **Clock** — the time (HH:MM) on STAT, and a full-screen Pip-Boy clock with date when you shake it. The time comes from the internet once at boot over your Wi-Fi, then Wi-Fi switches off (it gives up after about 40 seconds so it can't drain the battery).
+- **Clock** — the time (HH:MM) on STAT, and a full-screen Pip-Boy clock with date when you shake it. The StickS3 has a small battery-backed clock chip (RTC), so the time is set once over your Wi-Fi and then kept through power-offs and away from home. Wi-Fi is only used again if the chip ever loses the time, and it gives up after about 40 seconds so it can't drain the battery.
 
 ## Controls
 
@@ -58,7 +58,7 @@ const char* URL_INSTAGRAM = "https://instagram.com/YOUR_HANDLE";
 const char* URL_LINKEDIN  = "https://linkedin.com/in/YOUR_LINKEDIN";
 const char* URL_WEBSITE   = "https://YOUR-WEBSITE.example";
 const char* HANDLE        = "@YOUR_HANDLE";
-const char* WIFI_SSID     = "YOUR_WIFI_NAME";      // only used to fetch the time
+const char* WIFI_SSID     = "YOUR_WIFI_NAME";      // only used to set the clock once
 const char* WIFI_PASS     = "YOUR_WIFI_PASSWORD";
 ```
 

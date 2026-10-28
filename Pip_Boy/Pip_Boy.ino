@@ -16,7 +16,10 @@
 #include <M5Unified.h>
 #include <WiFi.h>
 #include <time.h>
+#include <sys/time.h>
 #include "sprites.h"
+
+#define TZ_LISBON "WET0WEST,M3.5.0/1,M10.5.0"   // Portugal time, with daylight saving
 
 // >>> your public links (safe to share) <<<
 const char* URL_INSTAGRAM = "https://instagram.com/YOUR_HANDLE";                  // RADIO tab
@@ -24,7 +27,7 @@ const char* URL_LINKEDIN  = "https://linkedin.com/in/YOUR_LINKEDIN";            
 const char* URL_WEBSITE   = "https://YOUR-WEBSITE.example";                        // BASE tab
 const char* HANDLE        = "@YOUR_HANDLE";
 
-// Wi-Fi is used once at boot only, to fetch the clock time (NTP). GitHub copy keeps placeholders.
+// Wi-Fi is only used to set the clock the first time; after that the RTC chip keeps it. GitHub copy keeps placeholders.
 const char* WIFI_SSID     = "YOUR_WIFI_NAME";
 const char* WIFI_PASS     = "YOUR_WIFI_PASSWORD";
 
@@ -42,8 +45,40 @@ const char* TAB_NAME[T_COUNT] = { "STAT", "COMMS", "BASE", "RADIO", "RAD" };
 int tab = T_STAT;
 bool bootWifiOk = false;          // did Wi-Fi connect at boot (for the clock)
 bool timeScreen = false;          // shake toggles the full Pip-Boy clock screen
-bool timeSynced = false;          // has NTP set the clock yet
+bool timeSynced = false;          // do we have a real time yet (from the RTC chip or NTP)
 bool wifiGaveUp = false;          // stopped trying NTP (so the radio can't drain the battery)
+bool rtcPresent = false;          // does this stick have a battery-backed clock chip
+bool fromRtc    = false;          // did we restore the time from that chip at boot
+
+// ---- battery-backed clock (RTC) helpers ----
+// The RTC chip keeps ticking while the stick is off, on its own trickle of power,
+// so we set it once and it holds the time anywhere - no home Wi-Fi needed again.
+// We store UTC in the chip and let the timezone turn it into local time for the screen.
+
+// read the RTC into the system clock; true if it held a real (already-set) time
+bool loadTimeFromRtc(){
+  if(!rtcPresent) return false;
+  auto dt = M5.Rtc.getDateTime();
+  if(dt.date.year < 2021) return false;          // 2000 = never been set
+  struct tm tmu = {0};
+  tmu.tm_year = dt.date.year - 1900;
+  tmu.tm_mon  = dt.date.month - 1;
+  tmu.tm_mday = dt.date.date;
+  tmu.tm_hour = dt.time.hours;
+  tmu.tm_min  = dt.time.minutes;
+  tmu.tm_sec  = dt.time.seconds;
+  time_t utc = timegm(&tmu);                      // the chip holds UTC
+  struct timeval tv = { utc, 0 };
+  settimeofday(&tv, nullptr);
+  return true;
+}
+
+// copy the current (NTP-correct) system time into the RTC chip so it survives power-off
+void saveTimeToRtc(){
+  if(!rtcPresent) return;
+  time_t now = time(nullptr);
+  M5.Rtc.setDateTime(gmtime(&now));               // store UTC
+}
 
 // ---------- sound ----------
 bool muted = false;
@@ -242,7 +277,7 @@ void drawTimeScreen(){
   const char* days[] = {"SUN","MON","TUE","WED","THU","FRI","SAT"};
   const char* mons[] = {"JAN","FEB","MAR","APR","MAY","JUN","JUL","AUG","SEP","OCT","NOV","DEC"};
   if(ok){ char dl[28]; sprintf(dl, "%s  %02d %s %04d", days[t.tm_wday], t.tm_mday, mons[t.tm_mon], 1900+t.tm_year); canvas.drawString(dl, 67, 130); }
-  else  { canvas.setTextColor(C_DIM); canvas.drawString(bootWifiOk ? "no time signal" : "no wifi at boot", 67, 130); canvas.setTextColor(C_GRN); }
+  else  { canvas.setTextColor(C_DIM); canvas.drawString(rtcPresent ? "sync once at home" : "no wifi at boot", 67, 130); canvas.setTextColor(C_GRN); }
   canvas.setTextColor(C_DIM);
   char rad[22]; sprintf(rad, "RADS   %d cps", gLevel*8); canvas.drawString(rad, 67, 150);
   canvas.drawString("STATUS   NOMINAL", 67, 162);
@@ -279,18 +314,31 @@ void setup(){
   M5.Display.setRotation(0);        // GPIO pins up, big button at the bottom. If upside down, try 2.
   M5.Speaker.begin();
   M5.Speaker.setVolume(140);
-  WiFi.mode(WIFI_STA);
-  // grab the real time once at boot, then run the clock locally (no battery-backed RTC)
-  WiFi.begin(WIFI_SSID, WIFI_PASS);
-  for(int i=0; i<30 && WiFi.status()!=WL_CONNECTED; i++) delay(300);   // up to ~9s to join
-  bootWifiOk = (WiFi.status()==WL_CONNECTED);
-  if(bootWifiOk){
-    configTzTime("WET0WEST,M3.5.0/1,M10.5.0", "pool.ntp.org", "time.google.com", "time.cloudflare.com");
-    struct tm t; for(int i=0; i<20 && !getLocalTime(&t, 0); i++) delay(300);   // ~6s at boot
-    if(getLocalTime(&t, 0)){ timeSynced = true; WiFi.disconnect(); }
-    // if not synced yet, leave Wi-Fi on; loop() keeps trying NTP, then disconnects once it lands
-  } else {
-    WiFi.disconnect();
+
+  // timezone first, so local time is right whether it comes from the chip or NTP
+  setenv("TZ", TZ_LISBON, 1);
+  tzset();
+
+  // 1) if the stick has a battery-backed clock chip and it already knows the time,
+  //    load it instantly - no Wi-Fi, works anywhere.
+  rtcPresent = M5.Rtc.isEnabled();
+  if(loadTimeFromRtc()){ timeSynced = true; fromRtc = true; }
+
+  // 2) only reach for home Wi-Fi/NTP if we DON'T already have a valid time.
+  //    once the chip is set, this is skipped forever, so no more boot-time drain.
+  if(!timeSynced){
+    WiFi.mode(WIFI_STA);
+    WiFi.begin(WIFI_SSID, WIFI_PASS);
+    for(int i=0; i<30 && WiFi.status()!=WL_CONNECTED; i++) delay(300);   // up to ~9s to join
+    bootWifiOk = (WiFi.status()==WL_CONNECTED);
+    if(bootWifiOk){
+      configTzTime(TZ_LISBON, "pool.ntp.org", "time.google.com", "time.cloudflare.com");
+      struct tm t; for(int i=0; i<20 && !getLocalTime(&t, 0); i++) delay(300);   // ~6s at boot
+      if(getLocalTime(&t, 0)){ timeSynced = true; saveTimeToRtc(); WiFi.disconnect(); }
+      // if not synced yet, leave Wi-Fi on; loop() keeps trying NTP, then disconnects once it lands
+    } else {
+      WiFi.disconnect();
+    }
   }
   canvas.setColorDepth(16);
   canvas.createSprite(135, 240);
@@ -305,7 +353,7 @@ void loop(){
   // give up after ~40s so a blocked time server can't keep the radio on and drain the battery.
   if(bootWifiOk && !timeSynced && !wifiGaveUp){
     struct tm t;
-    if(getLocalTime(&t, 0)){ timeSynced = true; WiFi.disconnect(); }
+    if(getLocalTime(&t, 0)){ timeSynced = true; saveTimeToRtc(); WiFi.disconnect(); }
     else if(millis() > 40000){ WiFi.disconnect(); wifiGaveUp = true; }
   }
   if(M5.BtnA.wasPressed()){ tab = (tab + 1) % T_COUNT; beep(1046, 30); onEnterTab(); }
