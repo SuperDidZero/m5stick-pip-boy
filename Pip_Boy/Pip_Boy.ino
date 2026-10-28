@@ -143,6 +143,9 @@ uint16_t segMaskSmall(char c){
     case 'X': return SB|SC|SE|SF|SG1|SG2;
     case 'Y': return SF|SG1|SG2|SB|SC|SD;
     case 'Z': return SA|SB|SG1|SG2|SE|SD;
+    case 'D': return SB|SC|SD|SE|SG1|SG2;
+    case 'B': return SC|SD|SE|SF|SG1|SG2;
+    case 'R': return SA|SB|SE|SF|SG1|SG2|SL;
     default:  return segMask(c);
   }
 }
@@ -174,16 +177,17 @@ void segDraw(int x, int y, int w, int h, int t, uint16_t m, uint16_t col){
   int hf = t/2;
   int xL = x + hf, xR = x + w - 1 - hf, xC = x + w/2;
   int yT = y + hf, yB = y + h - 1 - hf, yM = y + h/2;
-  if(m & SA)  segH(xL+g+1, xR-g-1, yT, t, col);
-  if(m & SD)  segH(xL+g+1, xR-g-1, yB, t, col);
-  if(m & SG1) segH(xL+g+1, (m & SG2) ? xC-g : xC, yM, t, col);
-  if(m & SG2) segH((m & SG1) ? xC+g : xC, xR-g-1, yM, t, col);
-  if(m & SF)  segV(xL, yT+g+1, yM-g-1, t, col);
-  if(m & SB)  segV(xR, yT+g+1, yM-g-1, t, col);
-  if(m & SE)  segV(xL, yM+g+1, yB-g-1, t, col);
-  if(m & SC)  segV(xR, yM+g+1, yB-g-1, t, col);
-  if(m & SI)  segV(xC, yT+g+1, yM-g-1, t, col);
-  if(m & SL)  segV(xC, yM+g+1, yB-g-1, t, col);
+  int o = (t > 2) ? g + 1 : 0;        // thin strokes join at the corners so small letters stay solid
+  if(m & SA)  segH(xL+o, xR-o, yT, t, col);
+  if(m & SD)  segH(xL+o, xR-o, yB, t, col);
+  if(m & SG1) segH(xL+o, (m & SG2) ? xC-g : xC, yM, t, col);
+  if(m & SG2) segH((m & SG1) ? xC+g : xC, xR-o, yM, t, col);
+  if(m & SF)  segV(xL, yT+o, yM-o, t, col);
+  if(m & SB)  segV(xR, yT+o, yM-o, t, col);
+  if(m & SE)  segV(xL, yM+o, yB-o, t, col);
+  if(m & SC)  segV(xR, yM+o, yB-o, t, col);
+  if(m & SI)  segV(xC, yT+o, yM-o, t, col);
+  if(m & SL)  segV(xC, yM+o, yB-o, t, col);
   if(m & SH)  segD(xL+t, yT+t, xC-1, yM-1-hf, t, col);
   if(m & SJ)  segD(xR-t, yT+t, xC+1, yM-1-hf, t, col);
   if(m & SK)  segD(xL+t, yB-t, xC-1, yM+1+hf, t, col);
@@ -191,7 +195,7 @@ void segDraw(int x, int y, int w, int h, int t, uint16_t m, uint16_t col){
 }
 
 int segCharW(char c, int w, int t){ return (c==':' || c=='.') ? t + 2 : w; }
-int segGap(int h){ return (h >= 14) ? 3 : 1; }
+int segGap(int h){ return (h >= 18) ? 3 : (h >= 12) ? 2 : 1; }
 
 int segWidth(const char* s, int h, int w, int t){
   int tot = 0, n = 0;
@@ -218,7 +222,7 @@ int segText(const char* s, int x, int y, int h, int w, int t, int align, uint16_
       canvas.fillRect(x + w - 2, y + h - 2, 2, 2, col);
     } else {
       if(ghost && ((c >= '0' && c <= '9') || c == ' ')) segDraw(x, y, w, h, t, SEG7ALL, C_GHOST);
-      segDraw(x, y, w, h, t, (w < 8) ? segMaskSmall(c) : segMask(c), col);
+      segDraw(x, y, w, h, t, (w < 10) ? segMaskSmall(c) : segMask(c), col);
     }
     x += cw + gap;
   }
@@ -310,14 +314,16 @@ int idleState = 0; uint32_t idleUntil = 0;
 void drawFigure(){
   int lvl = M5.Power.getBatteryLevel(); if(lvl < 0) lvl = 100;
   int bob = (int)(sinf(millis()/300.0) * 3);   // gentle up/down
-  segSmall(HANDLE, 67, 22, 1, C_GRN);
   struct tm tnow;                              // time + date, only once a known Wi-Fi gave the time
   if(getLocalTime(&tnow, 0)){
+    segSmall(HANDLE, 67, 22, 1, C_GRN);               // handle small, time and date under it
     char tb[12]; sprintf(tb, "%02d:%02d", tnow.tm_hour, tnow.tm_min);
     char db[24]; sprintf(db, "%02d.%02d.%04d", tnow.tm_mday, tnow.tm_mon + 1, 1900 + tnow.tm_year);
     segText(tb, 67, 33, 22, 16, 3, 1, C_GRN, true);    // big LCD clock with unlit segments behind
     segText(db, 67, 57, 7, 4, 1, 1, C_GRN, true);             // date in numbers: day.month.year
-  }                                            // no time: leave the space empty
+  } else {
+    segText(HANDLE, 67, 32, 16, 8, 2, 1, C_GRN, false);  // no time: the handle gets the space, bigger
+  }
   if(lvl > 50){
     // random idle: walk, stop, thumbs-up/wink, wave
     if(millis() > idleUntil){

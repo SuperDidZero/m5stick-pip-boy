@@ -15,7 +15,7 @@ Built by **SuperDidZero**. The vault-dweller figure is my own cartoon avatar, le
 
 ### About the time
 
-The StickS3 has no battery-backed clock, so it can't keep time while it's switched off. At every boot it tries your Wi-Fi once to fetch the time, then turns Wi-Fi off (it gives up after about 40 seconds so it can't drain the battery). If it got the time, STAT shows it until you switch off, even after you leave home. If there was no known Wi-Fi at boot, the time and date are simply left off the screen.
+The StickS3 has no battery-backed clock, so it can't keep time while it's switched off. At every boot it tries your Wi-Fi once to fetch the time, then turns Wi-Fi off (it gives up after about 40 seconds so it can't drain the battery). If it got the time, STAT shows it until you switch off, even after you leave home. If there was no known Wi-Fi at boot, the time and date are left off and your handle is shown bigger in their place.
 
 ### LCD lettering
 
