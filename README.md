@@ -6,31 +6,34 @@ Built by **SuperDidZero**. The vault-dweller figure is my own cartoon avatar, le
 
 ## What it does
 
-- **STAT** — a walking vault-dweller + your handle, with HP = the real battery level along the bottom. He reacts to the battery:
+- **STAT** — a walking vault-dweller, your handle, and the time and date. HP = the real battery level along the bottom. He reacts to the battery:
   - above 50%: random idle poses (walks, stops, thumbs up with a wink, waves)
   - 20–50%: slumped and panting
   - under 20%: collapsed on the floor
 - **COMMS / BASE / RADIO** — three QR codes (LinkedIn, website, Instagram), each playing a short public-domain tune when you open it.
-- **RAD** — a Geiger counter driven by the strongest Wi-Fi signal around you (needle + clicks), plus a count of nearby networks.
-- **Clock** — the time (HH:MM) on STAT, and a full-screen Pip-Boy clock with date when you shake it. The StickS3 has a small battery-backed clock chip (RTC), so the time is set once over your Wi-Fi and then kept through power-offs and away from home. Wi-Fi is only used again if the chip ever loses the time, and it gives up after about 40 seconds so it can't drain the battery.
+- **RAD counter** (shake) — a full-screen Geiger counter driven by the strongest Wi-Fi signal around you (needle + clicks), plus a count of nearby networks.
+
+### About the time
+
+The StickS3 has no battery-backed clock, so it can't keep time while it's switched off. At every boot it tries your Wi-Fi once to fetch the time, then turns Wi-Fi off (it gives up after about 40 seconds so it can't drain the battery). If it got the time, STAT shows it until you switch off, even after you leave home. If there was no known Wi-Fi at boot, the time and date are simply left off the screen.
 
 ## Controls
 
 - **Front button** — next tab
 - **Side button** — previous tab
-- **Shake** — full-screen clock, shake again to go back
+- **Shake** — full-screen RAD counter, shake again to go back
 
 ## How it fits together
 
 ```mermaid
 flowchart LR
     BOOT([Power on]) --> STAT
-    STAT["STAT<br/>figure + handle<br/>HP = battery"] -- front --> COMMS["COMMS<br/>LinkedIn QR"]
+    STAT["STAT<br/>figure, handle<br/>time and date<br/>HP = battery"] -- front --> COMMS["COMMS<br/>LinkedIn QR"]
     COMMS -- front --> BASE["BASE<br/>website QR"]
     BASE -- front --> RADIO["RADIO<br/>Instagram QR"]
-    RADIO -- front --> RAD["RAD<br/>Wi-Fi Geiger"]
-    RAD -- front --> STAT
-    SIDE[["Side button = previous tab<br/>Shake = full-screen clock"]]
+    RADIO -- front --> STAT
+    STAT <-. shake .-> RAD["RAD counter<br/>Wi-Fi Geiger<br/>full screen"]
+    SIDE[["Side button = previous tab"]]
 ```
 
 The figure on STAT changes with the real battery level:
@@ -41,6 +44,8 @@ flowchart LR
     B -->|battery drops| C["Under 20%<br/>collapsed on the floor"]
     C -->|charging| A
 ```
+
+The RAD counter opens from any tab, not just STAT.
 
 ## Build it
 
@@ -58,7 +63,7 @@ const char* URL_INSTAGRAM = "https://instagram.com/YOUR_HANDLE";
 const char* URL_LINKEDIN  = "https://linkedin.com/in/YOUR_LINKEDIN";
 const char* URL_WEBSITE   = "https://YOUR-WEBSITE.example";
 const char* HANDLE        = "@YOUR_HANDLE";
-const char* WIFI_SSID     = "YOUR_WIFI_NAME";      // only used to set the clock once
+const char* WIFI_SSID     = "YOUR_WIFI_NAME";      // only used to fetch the time at boot
 const char* WIFI_PASS     = "YOUR_WIFI_PASSWORD";
 ```
 

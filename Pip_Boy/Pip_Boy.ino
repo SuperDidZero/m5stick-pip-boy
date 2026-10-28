@@ -1,9 +1,10 @@
 /*
   Miniature Pip-Boy (by SuperDidZero)  -  M5StickS3
   --------------------------------------------------------------
-  Tabs:  STAT (you) | COMMS (LinkedIn) | BASE (website) | RADIO (Instagram) | RAD (Geiger)
+  Tabs:  STAT (you + time and date) | COMMS (LinkedIn) | BASE (website) | RADIO (Instagram)
   Front button (BtnA) = next tab      Side button (BtnB) = previous tab
-  Shake = full-screen Pip-Boy clock (shake again to go back)
+  Shake = full-screen RAD counter (Wi-Fi Geiger), shake again to go back
+  Time and date come from a known Wi-Fi at boot; with none, they are simply not shown.
   Battery drives the figure: >50% healthy (walks, winks, thumbs up),
   20-50% tired, under 20% knocked out on the floor.
 
@@ -16,10 +17,7 @@
 #include <M5Unified.h>
 #include <WiFi.h>
 #include <time.h>
-#include <sys/time.h>
 #include "sprites.h"
-
-#define TZ_LISBON "WET0WEST,M3.5.0/1,M10.5.0"   // Portugal time, with daylight saving
 
 // >>> your public links (safe to share) <<<
 const char* URL_INSTAGRAM = "https://instagram.com/YOUR_HANDLE";                  // RADIO tab
@@ -27,7 +25,7 @@ const char* URL_LINKEDIN  = "https://linkedin.com/in/YOUR_LINKEDIN";            
 const char* URL_WEBSITE   = "https://YOUR-WEBSITE.example";                        // BASE tab
 const char* HANDLE        = "@YOUR_HANDLE";
 
-// Wi-Fi is only used to set the clock the first time; after that the RTC chip keeps it. GitHub copy keeps placeholders.
+// Wi-Fi is used once at boot only, to fetch the clock time (NTP). GitHub copy keeps placeholders.
 const char* WIFI_SSID     = "YOUR_WIFI_NAME";
 const char* WIFI_PASS     = "YOUR_WIFI_PASSWORD";
 
@@ -40,16 +38,13 @@ uint16_t KEY = SPR_KEY; // sprite transparent colour
 M5Canvas canvas(&M5.Display);
 
 // ---------- tabs ----------
-enum { T_STAT, T_COMMS, T_BASE, T_RADIO, T_RAD, T_COUNT };
-const char* TAB_NAME[T_COUNT] = { "STAT", "COMMS", "BASE", "RADIO", "RAD" };
+enum { T_STAT, T_COMMS, T_BASE, T_RADIO, T_COUNT };
+const char* TAB_NAME[T_COUNT] = { "STAT", "COMMS", "BASE", "RADIO" };
 int tab = T_STAT;
 bool bootWifiOk = false;          // did Wi-Fi connect at boot (for the clock)
-bool timeScreen = false;          // shake toggles the full Pip-Boy clock screen
-bool timeSynced = false;          // do we have a real time yet (from the RTC chip or NTP)
+bool radScreen  = false;          // shake toggles the full-screen RAD counter
+bool timeSynced = false;          // has NTP set the clock yet
 bool wifiGaveUp = false;          // stopped trying NTP (so the radio can't drain the battery)
-bool rtcPresent = false;          // does this stick have a battery-backed clock chip
-bool fromRtc    = false;          // did we restore the time from that chip at boot
-
 
 // ---------- sound ----------
 bool muted = false;
@@ -75,55 +70,13 @@ void updateMelody(){
 }
 void beep(uint16_t f, uint16_t d){ if(!muted) M5.Speaker.tone(f,d); }
 
-// ---- battery-backed clock (RTC) helpers ----
-// The RTC chip keeps ticking while the stick is off, on its own trickle of power,
-// so we set it once and it holds the time anywhere - no home Wi-Fi needed again.
-// We store UTC in the chip and let the timezone turn it into local time for the screen.
-
-// turn a UTC date/time into seconds since 1970 (ESP32 has no timegm)
-time_t utcFromTm(const struct tm* t){
-  int y = t->tm_year + 1900, m = t->tm_mon + 1, d = t->tm_mday;
-  y -= (m <= 2);
-  long era = (y >= 0 ? y : y - 399) / 400;
-  long yoe = y - era * 400;
-  long doy = (153 * (m + (m > 2 ? -3 : 9)) + 2) / 5 + d - 1;
-  long doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
-  long days = era * 146097L + doe - 719468L;
-  return (time_t)days * 86400 + t->tm_hour * 3600 + t->tm_min * 60 + t->tm_sec;
-}
-
-// read the RTC into the system clock; true if it held a real (already-set) time
-bool loadTimeFromRtc(){
-  if(!rtcPresent) return false;
-  auto dt = M5.Rtc.getDateTime();
-  if(dt.date.year < 2021) return false;          // 2000 = never been set
-  struct tm tmu = {0};
-  tmu.tm_year = dt.date.year - 1900;
-  tmu.tm_mon  = dt.date.month - 1;
-  tmu.tm_mday = dt.date.date;
-  tmu.tm_hour = dt.time.hours;
-  tmu.tm_min  = dt.time.minutes;
-  tmu.tm_sec  = dt.time.seconds;
-  time_t utc = utcFromTm(&tmu);                      // the chip holds UTC
-  struct timeval tv = { utc, 0 };
-  settimeofday(&tv, nullptr);
-  return true;
-}
-
-// copy the current (NTP-correct) system time into the RTC chip so it survives power-off
-void saveTimeToRtc(){
-  if(!rtcPresent) return;
-  time_t now = time(nullptr);
-  M5.Rtc.setDateTime(gmtime(&now));               // store UTC
-}
-
 // ---------- geiger ----------
 int   gLevel = 0, gCount = 0;   // gLevel 0..12 from strongest signal; gCount = networks seen
 uint32_t gNextClick = 0, gNextScan = 0;
 bool  scanning = false;
 
 void updateGeiger(){
-  if(tab != T_RAD) return;
+  if(!radScreen) return;
   // kick off an async wifi scan every ~3s
   if(!scanning && millis() > gNextScan){
     WiFi.scanNetworks(true, true);   // async, show hidden
@@ -148,16 +101,17 @@ void updateGeiger(){
   }
 }
 
-// ---------- shake to mute ----------
+// ---------- shake opens the RAD counter ----------
 float lastMag = 1.0; uint32_t shakeLock = 0;
 void checkShake(){
   float ax, ay, az;
   if(M5.Imu.getAccel(&ax, &ay, &az)){
     float mag = sqrtf(ax*ax + ay*ay + az*az);
     if(fabs(mag - lastMag) > 0.7 && millis() > shakeLock){
-      timeScreen = !timeScreen;              // shake flips the full Pip-Boy clock screen
+      radScreen = !radScreen;                // shake flips the full-screen RAD counter
       shakeLock = millis() + 700;
-      beep(timeScreen ? 1200 : 700, 45);
+      if(radScreen){ stopMelody(); gNextScan = 0; gLevel = 0; }
+      beep(radScreen ? 1200 : 700, 45);
     }
     lastMag = mag;
   }
@@ -167,7 +121,7 @@ void checkShake(){
 void drawTabs(){
   canvas.setTextSize(1);
   canvas.setTextDatum(top_left);
-  int gap = 2, total = 0, w[T_COUNT];
+  int gap = 6, total = 0, w[T_COUNT];
   for(int i=0;i<T_COUNT;i++){ w[i] = canvas.textWidth(TAB_NAME[i]); total += w[i]; }
   total += gap*(T_COUNT-1);
   int x = (135 - total)/2; if(x < 0) x = 0;
@@ -205,14 +159,16 @@ void drawFigure(){
   int bob = (int)(sinf(millis()/300.0) * 3);   // gentle up/down
   canvas.setTextColor(C_GRN); canvas.setTextDatum(top_center); canvas.setTextSize(1);
   canvas.drawString(HANDLE, 67, 22);
-  struct tm tnow;                              // boot clock (details live on the shake screen)
-  canvas.setTextDatum(top_center); canvas.setTextSize(2);
+  struct tm tnow;                              // time + date, only once a known Wi-Fi gave the time
   if(getLocalTime(&tnow, 0)){
+    const char* days[] = {"SUN","MON","TUE","WED","THU","FRI","SAT"};
+    const char* mons[] = {"JAN","FEB","MAR","APR","MAY","JUN","JUL","AUG","SEP","OCT","NOV","DEC"};
     char tb[6]; sprintf(tb, "%02d:%02d", tnow.tm_hour, tnow.tm_min);
-    canvas.setTextColor(C_GRN); canvas.drawString(tb, 67, 30);
-  } else {
-    canvas.setTextColor(C_DIM); canvas.drawString("--:--", 67, 30);
-  }
+    char db[20]; sprintf(db, "%s %02d %s", days[tnow.tm_wday], tnow.tm_mday, mons[tnow.tm_mon]);
+    canvas.setTextDatum(top_center); canvas.setTextColor(C_GRN);
+    canvas.setTextSize(2); canvas.drawString(tb, 67, 31);
+    canvas.setTextSize(1); canvas.setTextColor(C_DIM); canvas.drawString(db, 67, 49);
+  }                                            // no time: leave the space empty
   canvas.setTextSize(1); canvas.setTextColor(C_GRN);
   if(lvl > 50){
     // random idle: walk, stop, thumbs-up/wink, wave
@@ -227,17 +183,17 @@ void drawFigure(){
       bool leg = (millis()/260) % 2;
       const uint16_t* s = leg ? SPR_WALK : SPR_WALKF;
       int16_t sw = leg ? WALK_W : WALKF_W, sh = leg ? WALK_H : WALKF_H;
-      canvas.pushImage((135-sw)/2, 52+bob, sw, sh, s, KEY);
+      canvas.pushImage((135-sw)/2, 60+bob, sw, sh, s, KEY);
     } else if(idleState == 2){
-      canvas.pushImage((135-THUMB_W)/2, 52+bob, THUMB_W, THUMB_H, SPR_THUMB, KEY);
+      canvas.pushImage((135-THUMB_W)/2, 60+bob, THUMB_W, THUMB_H, SPR_THUMB, KEY);
     } else if(idleState == 3){
-      canvas.pushImage((135-WAVE_W)/2, 52+bob, WAVE_W, WAVE_H, SPR_WAVE, KEY);
+      canvas.pushImage((135-WAVE_W)/2, 60+bob, WAVE_W, WAVE_H, SPR_WAVE, KEY);
     } else {
-      canvas.pushImage((135-HEALTHY_W)/2, 52+bob, HEALTHY_W, HEALTHY_H, SPR_HEALTHY, KEY);
+      canvas.pushImage((135-HEALTHY_W)/2, 60+bob, HEALTHY_W, HEALTHY_H, SPR_HEALTHY, KEY);
     }
   } else if(lvl >= 20){
     int sway = (int)(sinf(millis()/450.0) * 2);
-    canvas.pushImage((135-TIRED_W)/2+sway, 54+bob, TIRED_W, TIRED_H, SPR_TIRED, KEY);
+    canvas.pushImage((135-TIRED_W)/2+sway, 62+bob, TIRED_W, TIRED_H, SPR_TIRED, KEY);
   } else {
     int breathe = (int)(sinf(millis()/700.0) * 2);
     canvas.pushImage((135-DOWN_W)/2, 90+breathe, DOWN_W, DOWN_H, SPR_DOWN, KEY);
@@ -276,38 +232,22 @@ void drawGeiger(){
   }
 }
 
-void drawTimeScreen(){
-  struct tm t; bool ok = getLocalTime(&t, 0);
+void drawRadScreen(){
   canvas.drawRect(0, 0, 135, 240, C_GRN);
-  canvas.setTextColor(C_GRN); canvas.setTextDatum(top_center); canvas.setTextSize(1);
-  canvas.drawString("PIP-BOY CLOCK", 67, 10);
-  canvas.drawFastHLine(10, 22, 115, C_DIM);
-  char hhmm[6]; if(ok) sprintf(hhmm, "%02d:%02d", t.tm_hour, t.tm_min); else strcpy(hhmm, "--:--");
-  canvas.setTextDatum(middle_center); canvas.setTextSize(4);
-  canvas.drawString(hhmm, 67, 72);
-  if(ok){ char ss[5]; sprintf(ss, ":%02d", t.tm_sec); canvas.setTextSize(2); canvas.drawString(ss, 67, 104); }
-  canvas.setTextDatum(top_center); canvas.setTextSize(1);
-  const char* days[] = {"SUN","MON","TUE","WED","THU","FRI","SAT"};
-  const char* mons[] = {"JAN","FEB","MAR","APR","MAY","JUN","JUL","AUG","SEP","OCT","NOV","DEC"};
-  if(ok){ char dl[28]; sprintf(dl, "%s  %02d %s %04d", days[t.tm_wday], t.tm_mday, mons[t.tm_mon], 1900+t.tm_year); canvas.drawString(dl, 67, 130); }
-  else  { canvas.setTextColor(C_DIM); canvas.drawString(rtcPresent ? "sync once at home" : "no wifi at boot", 67, 130); canvas.setTextColor(C_GRN); }
-  canvas.setTextColor(C_DIM);
-  char rad[22]; sprintf(rad, "RADS   %d cps", gLevel*8); canvas.drawString(rad, 67, 150);
-  canvas.drawString("STATUS   NOMINAL", 67, 162);
-  canvas.setTextColor(C_GRN); canvas.setTextDatum(bottom_center);
+  drawGeiger();
+  canvas.setTextColor(C_GRN); canvas.setTextDatum(bottom_center); canvas.setTextSize(1);
   canvas.drawString("shake to go back", 67, 232);
 }
 
 void render(){
   canvas.fillSprite(C_BG);
-  if(timeScreen){ drawTimeScreen(); canvas.pushSprite(0, 0); return; }
+  if(radScreen){ drawRadScreen(); canvas.pushSprite(0, 0); return; }
   drawTabs();
   switch(tab){
     case T_STAT:  drawFigure(); break;
     case T_COMMS: drawQR(URL_LINKEDIN,  "COMMS",  "LinkedIn"); break;
     case T_BASE:  drawQR(URL_WEBSITE,   "BASE",   "PC Build PT"); break;
     case T_RADIO: drawQR(URL_INSTAGRAM, "RADIO",  HANDLE); break;
-    case T_RAD:   drawGeiger(); break;
   }
   drawHP();
   canvas.pushSprite(0, 0);
@@ -318,7 +258,6 @@ void onEnterTab(){
   if(tab==T_COMMS) startMelody(M_BACH,  sizeof(M_BACH)/sizeof(Note));
   if(tab==T_BASE)  startMelody(M_BASE,  sizeof(M_BASE)/sizeof(Note));
   if(tab==T_RADIO) startMelody(M_STARS, sizeof(M_STARS)/sizeof(Note));
-  if(tab==T_RAD){ gNextScan=0; gLevel=0; }
 }
 
 void setup(){
@@ -327,31 +266,19 @@ void setup(){
   M5.Display.setRotation(0);        // GPIO pins up, big button at the bottom. If upside down, try 2.
   M5.Speaker.begin();
   M5.Speaker.setVolume(140);
-
-  // timezone first, so local time is right whether it comes from the chip or NTP
-  setenv("TZ", TZ_LISBON, 1);
-  tzset();
-
-  // 1) if the stick has a battery-backed clock chip and it already knows the time,
-  //    load it instantly - no Wi-Fi, works anywhere.
-  rtcPresent = M5.Rtc.isEnabled();
-  if(loadTimeFromRtc()){ timeSynced = true; fromRtc = true; }
-
-  // 2) only reach for home Wi-Fi/NTP if we DON'T already have a valid time.
-  //    once the chip is set, this is skipped forever, so no more boot-time drain.
-  if(!timeSynced){
-    WiFi.mode(WIFI_STA);
-    WiFi.begin(WIFI_SSID, WIFI_PASS);
-    for(int i=0; i<30 && WiFi.status()!=WL_CONNECTED; i++) delay(300);   // up to ~9s to join
-    bootWifiOk = (WiFi.status()==WL_CONNECTED);
-    if(bootWifiOk){
-      configTzTime(TZ_LISBON, "pool.ntp.org", "time.google.com", "time.cloudflare.com");
-      struct tm t; for(int i=0; i<20 && !getLocalTime(&t, 0); i++) delay(300);   // ~6s at boot
-      if(getLocalTime(&t, 0)){ timeSynced = true; saveTimeToRtc(); WiFi.disconnect(); }
-      // if not synced yet, leave Wi-Fi on; loop() keeps trying NTP, then disconnects once it lands
-    } else {
-      WiFi.disconnect();
-    }
+  WiFi.mode(WIFI_STA);
+  // grab the real time once at boot from a known Wi-Fi, then run the clock locally.
+  // The StickS3 has no battery-backed clock, so with no known Wi-Fi at boot no time is shown.
+  WiFi.begin(WIFI_SSID, WIFI_PASS);
+  for(int i=0; i<30 && WiFi.status()!=WL_CONNECTED; i++) delay(300);   // up to ~9s to join
+  bootWifiOk = (WiFi.status()==WL_CONNECTED);
+  if(bootWifiOk){
+    configTzTime("WET0WEST,M3.5.0/1,M10.5.0", "pool.ntp.org", "time.google.com", "time.cloudflare.com");
+    struct tm t; for(int i=0; i<20 && !getLocalTime(&t, 0); i++) delay(300);   // ~6s at boot
+    if(getLocalTime(&t, 0)){ timeSynced = true; WiFi.disconnect(); }
+    // if not synced yet, leave Wi-Fi on; loop() keeps trying NTP, then disconnects once it lands
+  } else {
+    WiFi.disconnect();
   }
   canvas.setColorDepth(16);
   canvas.createSprite(135, 240);
@@ -366,11 +293,11 @@ void loop(){
   // give up after ~40s so a blocked time server can't keep the radio on and drain the battery.
   if(bootWifiOk && !timeSynced && !wifiGaveUp){
     struct tm t;
-    if(getLocalTime(&t, 0)){ timeSynced = true; saveTimeToRtc(); WiFi.disconnect(); }
+    if(getLocalTime(&t, 0)){ timeSynced = true; WiFi.disconnect(); }
     else if(millis() > 40000){ WiFi.disconnect(); wifiGaveUp = true; }
   }
-  if(M5.BtnA.wasPressed()){ tab = (tab + 1) % T_COUNT; beep(1046, 30); onEnterTab(); }
-  if(M5.BtnB.wasPressed()){ tab = (tab - 1 + T_COUNT) % T_COUNT; beep(880, 30); onEnterTab(); }
+  if(M5.BtnA.wasPressed() && !radScreen){ tab = (tab + 1) % T_COUNT; beep(1046, 30); onEnterTab(); }
+  if(M5.BtnB.wasPressed() && !radScreen){ tab = (tab - 1 + T_COUNT) % T_COUNT; beep(880, 30); onEnterTab(); }
   checkShake();
   updateMelody();
   updateGeiger();
