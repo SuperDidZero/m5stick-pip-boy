@@ -24,6 +24,10 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # secrets.h is never on GitHub, so this check uses the blank example instead.
+      - name: Use the blank example secrets
+        run: cp Pip_Boy/secrets.example.h Pip_Boy/secrets.h
+
       - uses: arduino/compile-sketches@v1
         with:
           fqbn: m5stack:esp32:m5stack_sticks3

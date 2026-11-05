@@ -26,9 +26,8 @@ const char* URL_LINKEDIN  = "https://linkedin.com/in/YOUR_LINKEDIN";            
 const char* URL_WEBSITE   = "https://YOUR-WEBSITE.example";                        // BASE tab
 const char* HANDLE        = "@YOUR_HANDLE";
 
-// Wi-Fi is used once at boot only, to fetch the clock time (NTP). GitHub copy keeps placeholders.
-const char* WIFI_SSID     = "YOUR_WIFI_NAME";
-const char* WIFI_PASS     = "YOUR_WIFI_PASSWORD";
+// Wi-Fi is used once at boot only, to fetch the clock time (NTP).
+#include "secrets.h"   // Wi-Fi name and password
 
 // ---------- colours (green CRT) ----------
 #define C_BG   0x0160   // dark green-black

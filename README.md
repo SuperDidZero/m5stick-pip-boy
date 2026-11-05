@@ -73,11 +73,9 @@ const char* URL_INSTAGRAM = "https://instagram.com/YOUR_HANDLE";
 const char* URL_LINKEDIN  = "https://linkedin.com/in/YOUR_LINKEDIN";
 const char* URL_WEBSITE   = "https://YOUR-WEBSITE.example";
 const char* HANDLE        = "@YOUR_HANDLE";
-const char* WIFI_SSID     = "YOUR_WIFI_NAME";      // only used to fetch the time at boot
-const char* WIFI_PASS     = "YOUR_WIFI_PASSWORD";
 ```
 
-Use a 2.4 GHz network (the StickS3 can't join 5 GHz). Don't commit your real Wi-Fi password if you publish your copy.
+For Wi-Fi, copy `secrets.example.h` to a new file called `secrets.h` in the same folder and fill in your network name and password. The sketch will not compile without it. Wi-Fi is only used to fetch the time at boot. Use a 2.4 GHz network (the StickS3 can't join 5 GHz). `secrets.h` is listed in `.gitignore`, so it stays on your computer and never goes to GitHub.
 
 To use your own character, replace the sprites in `sprites.h` (RGB565, byte-swapped for the panel, `0x1FF8` as the transparent colour).
 
