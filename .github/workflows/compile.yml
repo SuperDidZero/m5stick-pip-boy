@@ -20,7 +20,7 @@ on:
 jobs:
   compile:
     name: M5StickS3
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
 
